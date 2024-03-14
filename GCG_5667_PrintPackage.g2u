@@ -1,0 +1,272 @@
+Program.Sub.ScreenSU.Start
+Gui.Form..Create
+Gui.Form..Caption("GSS Print Package")
+Gui.Form..Size(3705,1755)
+Gui.Form..MinX(0)
+Gui.Form..MinY(0)
+Gui.Form..Position(0,0)
+Gui.Form..BackColor(-2147483633)
+Gui.Form..MaxButton(False)
+Gui.Form..MinButton(False)
+Gui.Form..MousePointer(0)
+Gui.Form..Sizeable(False)
+Gui.Form..Event(UnLoad,Form_UnLoad)
+Gui.Form.lbl1.Create(Label,"Select Parent BOM:",True,1935,255,0,150,240,True,0,"Arial",8,-2147483633,0)
+Gui.Form.txtPart.Create(TextBox,"",True,2655,300,0,150,465,True,0,"Arial",8,-2147483643,1)
+Gui.Form.txtPart.Locked(True)
+Gui.Form.cmdBrowse.Create(Button)
+Gui.Form.cmdBrowse.Size(390,375)
+Gui.Form.cmdBrowse.Position(2925,420)
+Gui.Form.cmdBrowse.Caption("^")
+Gui.Form.cmdBrowse.Event(Click,cmdBrowse_Click)
+Gui.Form.cmdSavePDF.Create(Button)
+Gui.Form.cmdSavePDF.Size(1290,375)
+Gui.Form.cmdSavePDF.Position(1080,885)
+Gui.Form.cmdSavePDF.Caption("Create PDF")
+Gui.Form.cmdSavePDF.Event(Click,cmdSavePDF_Click)
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+	f.Intrinsic.Control.Try
+		gui.Form..Show
+	f.Intrinsic.Control.Catch
+		f.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, v.Ambient.CurrentSubroutine)
+	f.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.Form_UnLoad.Start
+	f.Intrinsic.Control.End
+Program.Sub.Form_UnLoad.End
+
+Program.Sub.ErrorMsg.Start
+v.Local.sError.Declare
+
+'Closes ODBC connection, default to connection : "con"
+f.Intrinsic.Control.If(v.ODBC!con.State, =, 1)
+	f.ODBC.Connection!con.Close
+f.Intrinsic.Control.EndIf
+
+'Generic Error message.
+f.Intrinsic.String.Build("Project GCG_5667_PrintPackage.g2u {0}{0}Subroutine: {1}{0}Error: {2} with Description: {3}", v.Ambient.NewLine, v.Args.CurrentSub, v.Ambient.ErrorNumber, v.Ambient.ErrorDescription, v.Local.sError)
+f.Intrinsic.UI.Msgbox(v.Local.sError)
+Program.Sub.ErrorMsg.End
+
+Program.Sub.cmdBrowse_Click.Start
+	f.Intrinsic.Control.Try
+		v.Local.sRet.Declare(string)
+		F.Intrinsic.UI.SetBrowserHotTypeAhead(True)
+		f.Intrinsic.UI.CommonBrowser(3000,"",v.Local.sRet)
+		f.Intrinsic.Control.If(v.Local.sRet,!=,"***CANCEL***")
+			f.Intrinsic.String.Split(v.local.sRet,"*!*",v.Local.sRet)
+			GUI.Form.txtPart.Text(V.Local.sRet(0).trim)
+		f.Intrinsic.Control.EndIf
+	f.Intrinsic.Control.Catch
+		f.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, v.Ambient.CurrentSubroutine)
+	f.Intrinsic.Control.EndTry
+Program.Sub.cmdBrowse_Click.End
+
+Program.Sub.cmdSavePDF_Click.Start
+	f.Intrinsic.Control.Try
+		v.local.sSQL.Declare(string)
+		v.Local.iCnt.Declare(long)
+		v.Local.iCnt2.Declare(long)
+		v.Local.bParentsFound.Declare(boolean,True)
+		v.Local.sBOMSeq.Declare(string)
+		v.Local.iLevel.Declare(long,2)
+		V.Local.sSaveFilePath.Declare(string)
+		v.Local.sSourceFilePath.Declare(string)
+		v.Local.sFileText.Declare(string)
+		v.Local.bRet.Declare(Boolean)
+		v.Local.iRunID.Declare(long)
+		v.Local.iReportID.Declare(long)
+		v.Local.iLogID.Declare(long)
+		v.Local.iRet.Declare(long)
+		v.Local.sReportPath.Declare(string)
+		v.Local.bFileFound.Declare(boolean)
+		v.Local.iNumLoops.Declare(long,0)
+		v.Local.sMfgLinkDir.Declare(string)
+		v.Local.sPartPDFList.Declare(string)
+		v.Local.sFinalPDFName.Declare(string)
+		v.Local.bIsOpen.Declare(boolean)
+		v.Local.sMessage.Declare(string)
+		v.Local.sNewPartLocation.Declare(string)
+		v.Local.sFilter.Declare(string)
+		
+		'If no part selected, no action to be done.
+		f.Intrinsic.Control.If(v.Screen.Form!txtPart.text,=,"")
+			f.Intrinsic.Control.ExitSub
+		f.Intrinsic.Control.EndIf
+		
+		'Get the manufactured to job & manufactured to stock parts for that BOM into datatable
+		f.Intrinsic.String.build("select left(a.sequence_bom,2) as Sequence_BOM, RTRIM(a.part) AS Part, rtrim(left(a.part,17)) as Part_Split, rtrim(if(length(a.part)>17,right(concat('0000',substring(rtrim(a.part),18,3)),2),'00')) as Rev, replace(b.description,'''','`') as Description, rtrim(a.parent) as Parent, rtrim(left(a.parent,17)) as Parent_Split, rtrim(if(length(a.parent)>17,right(concat('0000',substring(rtrim(a.parent),18,3)),2),'00')) as ParentRev, '1' as Level, 'Y' as ParentFlag from v_bom_mstr a inner join v_inventory_mstr b on a.part=b.part where (a.parent='{0}' and a.source in ('M','F') and a.um_inventory='EA') or (a.parent='{0}' and a.sequence_bom='0000') order by a.sequence_bom;", v.Screen.Form!txtPart.text,v.Local.sSQL)
+		f.ODBC.Connection!con.opencompanyconnection
+			f.Data.DataTable.CreateFromSQL("dtBOM","con",v.Local.sSQL)
+			f.Data.DataTable.CreateFromSQL("dtBOMTemp","con",v.Local.sSQL)
+			'dtBOM serves as a read-only copy of the data, while dtBOMTemp is the temp copy that is written to as the loop occurs.  The changes in dtBOMTemp are then merged with dtBOM.
+		f.ODBC.Connection!con.Close
+		
+		f.Data.DataView.Create("dtBOMTemp","dvBOM")
+		
+		f.Intrinsic.Control.If(v.DataTable.dtBOMTemp.RowCount,>,0)
+			f.Intrinsic.UI.InvokeWaitDialog("Generating BOM components print package...")
+			'f.Intrinsic.String.Build("ParentFlag='Y' and sequence_bom <>'0000'",v.Screen.Form!txtPart.text,v.Local.sFilter)
+			f.Intrinsic.Control.DoUntil(v.local.bParentsFound,=,False)
+				f.Data.DataView.SetFilter("dtBOMTemp","dvBOM","ParentFlag='Y' and sequence_bom <>'00'")
+				f.Intrinsic.Control.If(v.DataView.dtBOMTemp!dvBOM.RowCount,>,0)
+					'Iterate through the DT and grab any child parts where there is a parent.  When adding the child parts, increase the level.
+					f.Intrinsic.Control.For(v.Local.iCnt,0,v.dataview.dtBOMTemp!dvBOM.RowCount--,1)
+						f.Intrinsic.Control.If(v.DataView.dtBOMTemp!dvBOM(v.Local.iCnt).ParentFlag!FieldValTrim,=,"Y")
+'							f.Intrinsic.String.build("select left(a.sequence_bom,2) as Sequence_BOM, rtrim(a.part) as Part, left(a.part,17) as Part_Split, rtrim(if(length(a.part)>17,substring(a.part,18,3),'00')) as Rev, replace(b.description,'''','`') as Description, a.parent, '{1}' as Level, 'Y' as ParentFlag from v_bom_mstr a inner join v_inventory_mstr b on a.part=b.part where a.parent='{0}' and a.source in ('M','F') and a.um_inventory='EA' and a.sequence_bom != '0000' order by a.sequence_bom;", v.DataTable.dtBOM(v.Local.iCnt).Part!FieldValTrim,v.Local.iLevel,v.Local.sSQL)
+							f.Intrinsic.String.build("select left(a.sequence_bom,2) as Sequence_BOM, rtrim(a.part) as Part, left(a.part,17) as Part_Split, rtrim(if(length(a.part)>17,substring(a.part,18,3),'00')) as Rev, replace(b.description,'''','`') as Description, a.parent, '{1}' as Level, 'Y' as ParentFlag from v_bom_mstr a inner join v_inventory_mstr b on a.part=b.part where a.parent='{0}' and a.source in ('M','F') and a.um_inventory='EA' and a.sequence_bom !='0000' order by a.sequence_bom;", v.dataview.dtBOMTemp!dvBOM(v.Local.iCnt).Part!FieldValTrim,v.Local.iLevel,v.Local.sSQL)
+							f.ODBC.Connection!con.opencompanyconnection
+								f.Data.DataTable.CreateFromSQL("dtBOMChild","con",v.Local.sSQL)
+							f.ODBC.Connection!con.Close
+							
+							f.Intrinsic.Control.If(v.DataTable.dtBOMChild.RowCount,>,0)
+								'Make the sequences of the child BOM subsequences to the parent BOM sequence
+								f.Intrinsic.Control.For(v.Local.iCnt2,0,v.DataTable.dtBOMChild.RowCount--,1)
+									f.Intrinsic.String.Build("{0}.{1}",v.dataview.dtBOMTemp!dvBOM(v.Local.iCnt).Sequence_BOM!FieldValTrim, v.DataTable.dtBOMChild(v.Local.iCnt2).Sequence_BOM!FieldValTrim,v.Local.sBOMSeq)
+									f.Data.DataTable.SetValue("dtBOMChild",v.Local.iCnt2,"Sequence_BOM",v.Local.sBOMSeq)
+								f.Intrinsic.Control.Next(v.Local.iCnt2)
+							f.Intrinsic.Control.EndIf
+							f.Data.DataTable.SetValue("dtBOMTemp",v.DataView.dtBOMTemp!dvBOM(v.Local.iCnt).datatableindex,"ParentFlag","")
+							f.Data.DataTable.Merge("dtBOMChild","dtBOMTemp",True,2)
+							f.Data.DataTable.Close("dtBOMChild")
+						f.Intrinsic.Control.EndIf
+					f.Intrinsic.Control.Next(v.Local.iCnt)
+				f.Intrinsic.Control.Else
+					v.Local.bParentsFound.Set(False)
+				f.Intrinsic.Control.EndIf
+				f.Intrinsic.Math.Add(v.Local.iLevel,1,v.Local.iLevel)
+				v.Local.iCnt.Set(0)
+				v.Local.iCnt2.Set(0)
+			f.Intrinsic.Control.Loop
+			
+			f.Data.DataTable.DeleteRow("dtBOM")
+			f.Data.DataTable.acceptchanges("dtBOM")
+			f.Data.DataTable.Merge("dtBOMTemp","dtBOM",True,2)
+			f.Data.Dataview.Close("dtBOMTemp","dvBOM")
+			f.Data.DataTable.Close("dtBOMTemp")
+			V.Local.iCnt.Set(0)
+			
+			f.Data.DataView.Create("dtBOM","dvBOM",22,"","Sequence_BOM asc")
+			f.Data.DataView.ToDataTable("dtBOM","dvBOM","dtBOMSorted")
+			f.Data.DataTable.RemoveColumn("dtBOMSorted","ParentFlag")
+			f.Data.DataTable.RemoveColumn("dtBOMSorted","Level")
+			
+			f.ODBC.Connection!con.opencompanyconnection
+				f.ODBC.Connection!con.execute("delete from gcg_5667_bomexplode;")
+			f.ODBC.Connection!con.Close
+			
+			F.Intrinsic.Control.For(v.Local.iCnt,0,v.DataTable.dtBOMSorted.RowCount--,1)
+				f.Intrinsic.String.Build("insert into gcg_5667_bomexplode (Parent, Sequence, Part, Description) values ('{0}', '{1}', '{2}', '{3}');",v.DataTable.dtBOMSorted(v.Local.iCnt).Parent!FieldValTrim,v.DataTable.dtBOMSorted(v.Local.iCnt).Sequence_BOM!FieldValTrim,v.DataTable.dtBOMSorted(v.Local.iCnt).Part!FieldValTrim,v.DataTable.dtBOMSorted(v.Local.iCnt).Description!FieldValTrim,v.Local.sSQL)
+				
+				f.ODBC.Connection!con.opencompanyconnection
+					f.ODBC.Connection!con.execute(v.Local.sSQL)
+				f.ODBC.Connection!con.Close
+			F.Intrinsic.Control.Next(v.Local.iCnt)
+			
+			f.Intrinsic.String.Build("{0}{1}.pdf",V.Caller.LocalGSSTempDir,v.Screen.Form!txtPart.text,V.Local.sSaveFilePath)
+			
+			'Create PDF, using runreportpreproc.  Save pdf to %temp% dir and open
+			f.Intrinsic.String.Build("{0}\CUSTOM\GCG_5667_PrintPackage.rpt",v.caller.BusintDir,v.Local.sReportPath)
+			f.Global.BI.GetIDFromName("GCG_5667_PrintPackage.rpt",True,v.Local.iReportID)
+			f.Global.BI.GetRunID(v.Local.iRunID)
+			f.Global.BI.StartLogging(v.Local.iRunID,v.Local.iReportID,0,"GCG_5667_PrintPackage",v.Local.iLogID)
+			f.Global.BI.StopLogging(v.Local.iLogID)
+			f.Global.bi.RunReportPreProcessor(v.Local.iRunID,v.Local.iLogID,"","","",4,False,"",-1,"",0,v.Local.sSaveFilePath,"",v.Local.iret)
+			
+			f.Intrinsic.Control.DoUntil(v.Local.bFileFound,=,True)
+				'Time out after 15 seconds
+				f.Intrinsic.Control.If(v.Local.iNumLoops,=,15)
+					f.Intrinsic.UI.Msgbox("File search timed out.  If the file does not exist in your GSS local temp directory, please try again.")
+					f.Intrinsic.Control.ExitSub
+				f.Intrinsic.Control.EndIf
+				
+				f.Intrinsic.File.Exists(v.Local.sSaveFilePath,v.Local.bFileFound)
+				f.Intrinsic.Math.Add(v.Local.iNumLoops,1,v.Local.iNumLoops)
+				f.Intrinsic.UI.Sleep(1)
+			f.Intrinsic.Control.Loop
+			
+			f.Data.DataTable.AddExpressionColumn("dtBOMSorted","ParentPartUnderscore","string","Parent_Split+iif(ParentRev<>'','_'+ParentRev,'')")
+			
+			'Get the path of the MFG Link Dir.
+			f.ODBC.Connection!con.opencompanyconnection
+				f.ODBC.Connection!con.executeandreturn("select mfg_link_dir from gcg_4447_bomlink_dir",v.Local.sMfgLinkDir)
+			f.ODBC.Connection!con.Close
+			f.Intrinsic.Control.If(v.Local.sMfgLinkDir,=,"")
+				f.Intrinsic.UI.Msgbox("MFG Link Dir is not set in project 4447 options, so PDFs cannot be merged.  Please set this option and try again.")
+				f.Intrinsic.Control.ExitSub
+			f.Intrinsic.Control.Else
+				f.Intrinsic.String.Build("{0}\{1}MPP.pdf",v.Local.sMfgLinkDir,v.DataTable.dtbomsorted(0).ParentPartUnderscore!FieldValTrim,v.Local.sFinalPDFName)
+			f.Intrinsic.Control.EndIf
+			
+			'######################################################Looking at the BOM Target Link file path, get all PDF's that are named for the parts in the BOM and merge them with the print package PDF.  Name the new file the BOM parent with "MPP" appended on the end.
+			f.Data.DataTable.AddColumn("dtBOMSorted","MfgLinkDir","string")
+			f.Data.DataTable.SetValue("dtBOMSorted",-1,"MfgLinkDir",v.Local.sMfgLinkDir)	
+			
+			f.Data.DataTable.AddExpressionColumn("dtBOMSorted","PartPDFLocationUnderscore","string","MfgLinkDir+'\'+Part_Split+iif(Rev<>'','_'+Rev,'')+'.pdf'")
+			f.Data.DataTable.AddExpressionColumn("dtBOMSorted","PartPDFLocation","string","MfgLinkDir+'\'+Part+'.pdf'")
+			f.Data.DataView.Create("dtBOMSorted","dvBOMSorted",22)
+			
+			'Loop through the dataview to find the file locations that exist
+			v.Local.iCnt.Set(0)
+			f.Intrinsic.Control.For(v.Local.iCnt,0,v.DataView.dtbomsorted!dvBOMSorted.RowCount--,1)
+				v.Local.sNewPartLocation.Set("")
+				f.Intrinsic.File.Exists(v.DataView.dtbomsorted!dvBOMSorted(v.Local.iCnt).PartPDFLocationUnderscore!FieldVal,v.Local.bIsOpen)
+				f.Intrinsic.Control.If(v.Local.bIsOpen)
+					v.Local.sNewPartLocation.Set(v.DataView.dtbomsorted!dvBOMSorted(v.Local.iCnt).PartPDFLocationUnderscore!FieldVal)
+				f.Intrinsic.Control.Else
+					f.Intrinsic.File.Exists(v.DataView.dtbomsorted!dvBOMSorted(v.Local.iCnt).PartPDFLocation!FieldVal,v.Local.bIsOpen)	
+					f.Intrinsic.Control.If(v.Local.bIsOpen)
+						v.Local.sNewPartLocation.Set(v.DataView.dtbomsorted!dvBOMSorted(v.Local.iCnt).PartPDFLocation!FieldVal)
+					f.Intrinsic.Control.EndIf
+				f.Intrinsic.Control.EndIf
+				
+				f.Intrinsic.Control.If(v.Local.sNewPartLocation,=,"")
+					f.Intrinsic.String.Build("Document for Part {0} is missing from the directory.",v.DataView.dtbomsorted!dvBOMSorted(v.Local.iCnt).Part_Split!FieldValTrim,v.Local.sNewPartLocation)
+					f.Intrinsic.UI.Msgbox(v.Local.sNewPartLocation,"Print Package Ending")
+					f.Intrinsic.UI.CloseWaitDialog
+					f.Intrinsic.Control.ExitSub
+				f.Intrinsic.Control.EndIf
+				
+				'Add the new part to the string
+				f.Intrinsic.Control.If(v.Local.sPartPDFList,!=,"")
+					f.Intrinsic.String.Build("{0}*!*",v.Local.sPartPDFList,v.Local.sPartPDFList)
+				f.Intrinsic.Control.EndIf
+				f.Intrinsic.String.Build("{0}{1}",v.Local.sPartPDFList,v.Local.sNewPartLocation,v.Local.sPartPDFList)
+			f.Intrinsic.Control.Next(v.Local.iCnt)
+			
+			f.Intrinsic.String.Build("{0}*!*{1}",v.Local.sSaveFilePath,v.Local.sPartPDFList,v.Local.sPartPDFList)
+			'Check if PDF is open.  If so, change target location to MFGLockFile path
+			f.Intrinsic.file.IsFileLocked(v.Local.sFinalPDFName,v.Local.bIsOpen)
+			f.Intrinsic.Control.If(v.Local.bIsOpen)
+				'If the MFGLockFile folder does not exist, create it.
+				f.Intrinsic.String.Build("{0}\MFGLOCKFILE",V.Local.sMfgLinkDir,v.Local.sMfgLinkDir)
+				f.Intrinsic.File.DirExists(v.Local.sMfgLinkDir,v.Local.bIsOpen)
+				f.Intrinsic.Control.If(v.Local.bIsOpen,=,False)
+					f.Intrinsic.File.CreateDir(v.Local.sMfgLinkDir)
+				f.Intrinsic.Control.EndIf
+				'Change the target path to MfgLockFile directory
+				f.Intrinsic.String.Build("{0}\{1}MPP.pdf",v.Local.sMfgLinkDir,v.DataTable.dtbomsorted(0).ParentPartUnderscore!FieldValTrim,v.Local.sFinalPDFName)
+				v.Local.sMessage.Set("Attention: The specified print package appears to be open, so this has been moved to MFGLockFile folder.")
+			f.Intrinsic.Control.EndIf
+			f.Automation.PDF.Merge(v.Local.sPartPDFList,v.Local.sFinalPDFName)
+			f.Intrinsic.Control.If(v.local.sMessage,!=,"")
+				f.Intrinsic.ui.Msgbox(v.Local.sMessage,"Attention >> File Open")
+			f.Intrinsic.Control.EndIf
+			f.Intrinsic.Task.ShellExec(handle, "open",v.Local.sFinalPDFName,"","", 0)
+		f.Intrinsic.Control.Else
+			f.Intrinsic.UI.Msgbox("No Manufacture to Stock or Manufacture to Job components found for the selected BOM")
+		f.Intrinsic.Control.EndIf	
+	f.Intrinsic.Control.CatchWhen(205000)
+		f.Intrinsic.UI.Msgbox("Error encountered during PDF creation.  Either the file is open, or one or more than one PDF file is missing from the MFG Link Directory.  Please check and try again.","Error >> PDF Creation")
+	f.Intrinsic.Control.Catch
+		f.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, v.Ambient.CurrentSubroutine)
+	f.Intrinsic.Control.Finally
+		f.Intrinsic.UI.CloseWaitDialog
+	f.Intrinsic.Control.EndTry
+Program.Sub.cmdSavePDF_Click.End
